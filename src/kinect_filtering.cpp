@@ -55,22 +55,29 @@ namespace ar_track_alvar
   PlaneFitResult fitPlane (ARCloud::ConstPtr cloud)
   {
     PlaneFitResult res;
-    pcl::PointIndices::Ptr inliers=boost::make_shared<pcl::PointIndices>();
+    // Cannot perform RANSAC for a plane with less than 4 points.
+    // See pcl/sample_consensus/include/pcl/sample_consensus/impl/sac_model_plane.hpp:226
+    if(cloud->points.size() >= 4) {
+      pcl::PointIndices::Ptr inliers=boost::make_shared<pcl::PointIndices>();
 
-    pcl::SACSegmentation<ARPoint> seg;
-    seg.setOptimizeCoefficients(true);
-    seg.setModelType(pcl::SACMODEL_PLANE);
-    seg.setMethodType(pcl::SAC_RANSAC);
-    seg.setDistanceThreshold(distance_threshold_);
+      pcl::SACSegmentation<ARPoint> seg;
+      seg.setOptimizeCoefficients(true);
+      seg.setModelType(pcl::SACMODEL_PLANE);
+      seg.setMethodType(pcl::SAC_RANSAC);
+      seg.setDistanceThreshold(distance_threshold_);
 
-    seg.setInputCloud(cloud);
-    seg.segment(*inliers, res.coeffs);
+      seg.setInputCloud(cloud);
+      seg.segment(*inliers, res.coeffs);
 
-    pcl::ExtractIndices<ARPoint> extracter;
-    extracter.setInputCloud(cloud);
-    extracter.setIndices(inliers);
-    extracter.setNegative(false);
-    extracter.filter(*res.inliers);
+      pcl::ExtractIndices<ARPoint> extracter;
+      extracter.setInputCloud(cloud);
+      extracter.setIndices(inliers);
+      extracter.setNegative(false);
+      extracter.filter(*res.inliers);
+    }
+    else {
+      *res.inliers = *cloud;
+    }
   
     return res;
   }

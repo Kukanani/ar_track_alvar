@@ -43,6 +43,7 @@
 #include <tf/transform_listener.h>
 #include <tf/transform_broadcaster.h>
 #include <sensor_msgs/image_encodings.h>
+#include <sensor_msgs/PointCloud2.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <dynamic_reconfigure/server.h>
 #include <ar_track_alvar/ParamsConfig.h>
@@ -66,6 +67,7 @@ ros::Subscriber cloud_sub_;
 ros::Publisher arMarkerPub_;
 ros::Publisher rvizMarkerPub_;
 ros::Publisher rvizMarkerPub2_;
+ros::Publisher pointCloudPub_;
 ar_track_alvar_msgs::AlvarMarkers arPoseMarkers_;
 visualization_msgs::Marker rvizMarker_;
 tf::TransformListener *tf_listener;
@@ -266,52 +268,54 @@ int PlaneFitPoseImprovement(int id, const ARCloud &corners_3D, ARCloud::Ptr sele
   return 0;
 }
 
-
-void GetMarkerPoses(IplImage *image, ARCloud &cloud) {
-
+void GetMarkerPoses(IplImage *image, ARCloud &cloud, std::string frame) {
   //Detect and track the markers
   if (marker_detector.Detect(image, cam, true, false, max_new_marker_error,
-			     max_track_error, CVSEQ, true)) 
-    {
-      printf("\n--------------------------\n\n");
-      for (size_t i=0; i<marker_detector.markers->size(); i++)
-     	{
-	  vector<cv::Point, Eigen::aligned_allocator<cv::Point> > pixels;
-	  Marker *m = &((*marker_detector.markers)[i]);
-	  int id = m->GetId();
-	  cout << "******* ID: " << id << endl;
+           max_track_error, CVSEQ, true)) 
+  {
+    for (size_t i=0; i<marker_detector.markers->size(); i++) {
+      vector<cv::Point, Eigen::aligned_allocator<cv::Point> > pixels;
+      Marker *m = &((*marker_detector.markers)[i]);
+      int id = m->GetId();
 
-	  int resol = m->GetRes();
-	  int ori = m->ros_orientation;
-      
-	  PointDouble pt1, pt2, pt3, pt4;
-	  pt4 = m->ros_marker_points_img[0];
-	  pt3 = m->ros_marker_points_img[resol-1];
-	  pt1 = m->ros_marker_points_img[(resol*resol)-resol];
-	  pt2 = m->ros_marker_points_img[(resol*resol)-1];
-	  
-	  m->ros_corners_3D[0] = cloud(pt1.x, pt1.y);
-	  m->ros_corners_3D[1] = cloud(pt2.x, pt2.y);
-	  m->ros_corners_3D[2] = cloud(pt3.x, pt3.y);
-	  m->ros_corners_3D[3] = cloud(pt4.x, pt4.y);
-	  
-	  if(ori >= 0 && ori < 4){
-	    if(ori != 0){
-	      std::rotate(m->ros_corners_3D.begin(), m->ros_corners_3D.begin() + ori, m->ros_corners_3D.end());
-	    }
-	  }
-	  else
-	    ROS_ERROR("FindMarkerBundles: Bad Orientation: %i for ID: %i", ori, id);
+      int resol = m->GetRes();
+      int ori = m->ros_orientation;
 
-	  //Get the 3D marker points
-	  BOOST_FOREACH (const PointDouble& p, m->ros_marker_points_img)
-	    pixels.push_back(cv::Point(p.x, p.y));	  
-	  ARCloud::Ptr selected_points = ata::filterCloud(cloud, pixels);
+      PointDouble pt1, pt2, pt3, pt4;
+      pt4 = m->ros_marker_points_img[0];
+      pt3 = m->ros_marker_points_img[resol-1];
+      pt1 = m->ros_marker_points_img[(resol*resol)-resol];
+      pt2 = m->ros_marker_points_img[(resol*resol)-1];
 
-	  //Use the kinect data to find a plane and pose for the marker
-	  int ret = PlaneFitPoseImprovement(i, m->ros_corners_3D, selected_points, cloud, m->pose);	
-	}
+      m->ros_corners_3D[0] = cloud(pt1.x, pt1.y);
+      m->ros_corners_3D[1] = cloud(pt2.x, pt2.y);
+      m->ros_corners_3D[2] = cloud(pt3.x, pt3.y);
+      m->ros_corners_3D[3] = cloud(pt4.x, pt4.y);
+
+      if(ori >= 0 && ori < 4) {
+        if(ori != 0) {
+          std::rotate(m->ros_corners_3D.begin(), m->ros_corners_3D.begin() + ori, m->ros_corners_3D.end());
+        }
+      }
+      else {
+        ROS_ERROR("GetMarkerPoses: Bad Orientation: %i for ID: %i", ori, id);
+      }
+
+      //Get the 3D marker points
+      BOOST_FOREACH (const PointDouble& p, m->ros_marker_points_img)
+        pixels.push_back(cv::Point(p.x, p.y));    
+      ARCloud::Ptr selected_points = ata::filterCloud(cloud, pixels);
+
+      // Publish downselected points as a pointcloud message
+      sensor_msgs::PointCloud2 selected_points_message;
+      pcl::toROSMsg(*selected_points, selected_points_message);
+      selected_points_message.header.frame_id = frame;
+      pointCloudPub_.publish(selected_points_message);
+
+      //Use the kinect data to find a plane and pose for the marker
+      int ret = PlaneFitPoseImprovement(i, m->ros_corners_3D, selected_points, cloud, m->pose); 
     }
+  }
 }
 
 void getPointCloudCallback (const sensor_msgs::PointCloud2ConstPtr &msg)
@@ -341,7 +345,8 @@ void getPointCloudCallback (const sensor_msgs::PointCloud2ConstPtr &msg)
 
     // Use the kinect to improve the pose
     Pose ret_pose;
-    GetMarkerPoses(&ipl_image, cloud);
+    //ROS_INFO_STREAM("frame id for incoming point cloud is " << msg->header.frame_id);
+    GetMarkerPoses(&ipl_image, cloud, msg->header.frame_id);
 
     try {
       tf::StampedTransform CamToOutput;
@@ -472,6 +477,7 @@ void configCallback(ar_track_alvar::ParamsConfig &config, uint32_t level)
 
 int main(int argc, char *argv[])
 {
+  std::cout << "NRG version of ar_track_alvar" << std::endl;
   ros::init (argc, argv, "marker_detect");
   ros::NodeHandle n, pn("~");
   
@@ -510,7 +516,8 @@ int main(int argc, char *argv[])
   arMarkerPub_ = n.advertise < ar_track_alvar_msgs::AlvarMarkers > ("ar_pose_marker", 0);
   rvizMarkerPub_ = n.advertise < visualization_msgs::Marker > ("visualization_marker", 0);
   rvizMarkerPub2_ = n.advertise < visualization_msgs::Marker > ("ARmarker_points", 0);
-	
+  pointCloudPub_ = n.advertise < sensor_msgs::PointCloud2 > ("ar_tag_point_cloud", 0);
+  
   // Prepare dynamic reconfiguration
   dynamic_reconfigure::Server < ar_track_alvar::ParamsConfig > server;
   dynamic_reconfigure::Server<ar_track_alvar::ParamsConfig>::CallbackType f;
