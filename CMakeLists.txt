@@ -128,6 +128,10 @@ add_executable(findMarkerBundlesNoKinect nodes/FindMarkerBundlesNoKinect.cpp)
 target_link_libraries(findMarkerBundlesNoKinect ar_track_alvar ${catkin_LIBRARIES})
 add_dependencies(findMarkerBundlesNoKinect ${PROJECT_NAME}_gencpp ${GENCPP_DEPS})
 
+add_executable(cylinderFromTagCloud nodes/CylinderFromTagCloud.cpp)
+target_link_libraries(cylinderFromTagCloud ar_track_alvar ${catkin_LIBRARIES})
+add_dependencies(cylinderFromTagCloud ${PROJECT_NAME}_gencpp ${GENCPP_DEPS})
+
 add_executable(createMarker src/SampleMarkerCreator.cpp)
 target_link_libraries(createMarker ar_track_alvar ${catkin_LIBRARIES})
 add_dependencies(createMarker ${PROJECT_NAME}_gencpp ${GENCPP_DEPS})
